@@ -421,11 +421,11 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       double _incoming_defer_ratio = 1.0; // 1:1
 
       // path to write the snapshots to
-      bfs::path _snapshots_dir;
+      std::filesystem::path _snapshots_dir;
 
       // async snapshot scheduler
       snapshot_scheduler _snapshot_scheduler;
-      
+
       // ro for read-only
       struct ro_trx_t {
          packed_transaction_ptr  trx;
@@ -462,7 +462,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       bool push_read_only_transaction(const transaction_metadata_ptr& trx,
                                       next_function<transaction_trace_ptr> next,
                                       const fc::time_point& read_window_start_time);
-      
+
       void consider_new_watermark( account_name producer, uint32_t block_num, block_timestamp_type timestamp) {
          auto itr = _producer_watermarks.find( producer );
          if( itr != _producer_watermarks.end() ) {
@@ -907,7 +907,7 @@ void producer_plugin::set_program_options(
           "Disable subjective CPU billing for API transactions")
          ("producer-threads", bpo::value<uint16_t>()->default_value(my->_thread_pool_size),
           "Number of worker threads in producer thread pool")
-         ("snapshots-dir", bpo::value<bfs::path>()->default_value("snapshots"),
+         ("snapshots-dir", bpo::value<std::filesystem::path>()->default_value("snapshots"),
           "the location of the snapshots directory (absolute path or relative to application data dir)")
          ("read-only-threads", bpo::value<uint16_t>()->default_value(my->_ro_thread_pool_size),
           "Number of worker threads in read-only transaction execution thread pool")
@@ -1072,17 +1072,17 @@ void producer_plugin::plugin_initialize(const boost::program_options::variables_
                "producer-threads ${num} must be greater than 0", ("num", my->_thread_pool_size));
 
    if( options.count( "snapshots-dir" )) {
-      auto sd = options.at( "snapshots-dir" ).as<bfs::path>();
+      auto sd = options.at( "snapshots-dir" ).as<std::filesystem::path>();
       if( sd.is_relative()) {
          my->_snapshots_dir = app().data_dir() / sd;
-         if (!fc::exists(my->_snapshots_dir)) {
-            fc::create_directories(my->_snapshots_dir);
+         if (!std::filesystem::exists(my->_snapshots_dir)) {
+            std::filesystem::create_directories(my->_snapshots_dir);
          }
       } else {
          my->_snapshots_dir = sd;
       }
 
-      EOS_ASSERT( fc::is_directory(my->_snapshots_dir), snapshot_directory_not_found_exception,
+      EOS_ASSERT( std::filesystem::is_directory(my->_snapshots_dir), snapshot_directory_not_found_exception,
                   "No such directory '${dir}'", ("dir", my->_snapshots_dir.generic_string()) );
 
       if (auto resmon_plugin = app().find_plugin<resource_monitor_plugin>()) {
@@ -1444,13 +1444,13 @@ void producer_plugin::create_snapshot(producer_plugin::next_function<producer_pl
    const auto& temp_path     = pending_snapshot::get_temp_path(head_id, my->_snapshots_dir);
 
    // maintain legacy exception if the snapshot exists
-   if( fc::is_regular_file(snapshot_path) ) {
+   if( std::filesystem::is_regular_file(snapshot_path) ) {
       auto ex = snapshot_exists_exception( FC_LOG_MESSAGE( error, "snapshot named ${name} already exists", ("name", snapshot_path.generic_string()) ) );
       next(ex.dynamic_copy_exception());
       return;
    }
 
-   auto write_snapshot = [&]( const bfs::path& p ) -> void {
+   auto write_snapshot = [&]( const std::filesystem::path& p ) -> void {
       auto reschedule = fc::make_scoped_exit([this](){
          my->schedule_production_loop();
       });
@@ -1462,7 +1462,7 @@ void producer_plugin::create_snapshot(producer_plugin::next_function<producer_pl
          reschedule.cancel();
       }
 
-      bfs::create_directory( p.parent_path() );
+      std::filesystem::create_directory( p.parent_path() );
 
       // create the snapshot
       auto snap_out = std::ofstream(p.generic_string(), (std::ios::out | std::ios::binary));
@@ -1479,7 +1479,7 @@ void producer_plugin::create_snapshot(producer_plugin::next_function<producer_pl
          write_snapshot( temp_path );
 
          boost::system::error_code ec;
-         bfs::rename(temp_path, snapshot_path, ec);
+         std::filesystem::rename(temp_path, snapshot_path, ec);
          EOS_ASSERT(!ec, snapshot_finalization_exception,
                "Unable to finalize valid snapshot of block number ${bn}: [code: ${ec}] ${message}",
                ("bn", head_block_num)
@@ -1511,7 +1511,7 @@ void producer_plugin::create_snapshot(producer_plugin::next_function<producer_pl
          write_snapshot( temp_path ); // create a new pending snapshot
 
          boost::system::error_code ec;
-         bfs::rename(temp_path, pending_path, ec);
+         std::filesystem::rename(temp_path, pending_path, ec);
          EOS_ASSERT(!ec, snapshot_finalization_exception,
                "Unable to promote temp snapshot to pending for block number ${bn}: [code: ${ec}] ${message}",
                ("bn", head_block_num)
@@ -2896,7 +2896,7 @@ bool producer_plugin_impl::read_only_trx_execution_task() {
       auto trx = _ro_trx_queue.queue.front();
       _ro_trx_queue.queue.pop_front();
       lck.unlock();
-      
+
       auto retry = process_read_only_transaction( trx.trx, trx.next, start );
       if ( retry ) {
          lck.lock();

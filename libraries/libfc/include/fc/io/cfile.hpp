@@ -34,11 +34,11 @@ public:
      : _file(nullptr, &fclose)
    {}
 
-   void set_file_path( fc::path file_path ) {
+   void set_file_path( std::filesystem::path file_path ) {
       _file_path = std::move( file_path );
    }
 
-   fc::path get_file_path() const {
+   std::filesystem::path get_file_path() const {
       return _file_path;
    }
 
@@ -221,7 +221,7 @@ public:
 
 private:
    bool                  _open = false;
-   fc::path              _file_path;
+   std::filesystem::path              _file_path;
    size_t                _file_blk_size = 4096;
    detail::unique_file   _file;
 };

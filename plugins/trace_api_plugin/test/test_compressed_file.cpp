@@ -10,37 +10,36 @@
 using namespace eosio;
 using namespace eosio::trace_api;
 
-namespace bfs = boost::filesystem;
 
 struct temp_file_fixture {
    temp_file_fixture() {}
 
    ~temp_file_fixture() {
       for (const auto& p: paths) {
-         if (bfs::exists(p)) {
-            bfs::remove(p);
+         if (std::filesystem::exists(p)) {
+            std::filesystem::remove(p);
          }
       }
    }
 
    std::string create_temp_file( const std::string& contents ) {
-      auto path = bfs::temp_directory_path() / bfs::unique_path();
-      auto os = bfs::ofstream(path, std::ios_base::out);
+      auto path = std::filesystem::temp_directory_path() / std::tmpnam(nullptr);
+      auto os = std::ofstream(path, std::ios_base::out);
       os << contents;
       os.close();
       return paths.emplace_back(std::move(path)).generic_string();
    }
 
    std::string create_temp_file( const void* data, size_t size ) {
-      auto path = bfs::temp_directory_path() / bfs::unique_path();
-      auto os = bfs::ofstream(path, std::ios_base::out|std::ios_base::binary);
+      auto path = std::filesystem::temp_directory_path() / std::tmpnam(nullptr);
+      auto os = std::ofstream(path, std::ios_base::out|std::ios_base::binary);
       if (data && size)
          os.write(reinterpret_cast<const char*>(data), size);
       os.close();
       return paths.emplace_back(std::move(path)).generic_string();
    }
 
-   std::list<bfs::path> paths;
+   std::list<std::filesystem::path> paths;
 };
 
 typedef std::tuple<uint64_t, std::array<char, 6733>> test_types;
@@ -195,7 +194,7 @@ BOOST_FIXTURE_TEST_CASE_TEMPLATE(blob_access_no_seek_points, T, test_types, temp
    fc::cfile compressed;
    compressed.set_file_path(compressed_filename);
    compressed.open("r");
-   compressed.seek(fc::file_size(compressed_filename) - 2);
+   compressed.seek(std::filesystem::file_size(compressed_filename) - 2);
    const uint16_t expected_seek_point_count = 0;
    uint16_t actual_seek_point_count = std::numeric_limits<uint16_t>::max();
    compressed.read(reinterpret_cast<char*>(&actual_seek_point_count), 2);

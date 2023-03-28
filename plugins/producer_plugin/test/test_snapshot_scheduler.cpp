@@ -57,7 +57,7 @@ BOOST_AUTO_TEST_CASE(snapshot_scheduler_test) {
       });
    }
    {
-      boost::filesystem::path temp = boost::filesystem::temp_directory_path() / boost::filesystem::unique_path();
+      std::filesystem::path temp = std::filesystem::temp_directory_path() / tmpnam(nullptr);
 
       try {
          std::promise<std::tuple<producer_plugin*, chain_plugin*>> plugin_promise;
@@ -97,11 +97,11 @@ BOOST_AUTO_TEST_CASE(snapshot_scheduler_test) {
                if (pending && pending->size()==1) {
                   // lets check the head block num of it, it should be 8 + 1 = 9
                   // this means we are getting a snapshot for correct block # as well
-                  BOOST_CHECK_EQUAL(9, pending->begin()->head_block_num);   
+                  BOOST_CHECK_EQUAL(9, pending->begin()->head_block_num);
                }
             }
          });
-       
+
          producer_plugin::snapshot_request_information sri1 = {.block_spacing = 8, .start_block_num = 1, .end_block_num = 300000, .snapshot_description = "Example of recurring snapshot 2"};
          producer_plugin::snapshot_request_information sri2 = {.block_spacing = 5000, .start_block_num = 100000, .end_block_num = 300000, .snapshot_description = "Example of recurring snapshot 2"};
          producer_plugin::snapshot_request_information sri3 = {.block_spacing = 2, .start_block_num = 0, .end_block_num = 3, .snapshot_description = "Example of recurring snapshot 1"};
@@ -133,10 +133,10 @@ BOOST_AUTO_TEST_CASE(snapshot_scheduler_test) {
          BOOST_CHECK_EQUAL(2, ssi.size());
          BOOST_CHECK_EQUAL(ssi.begin()->block_spacing, sri1.block_spacing);
       } catch(...) {
-         bfs::remove_all(temp);
+         std::filesystem::remove_all(temp);
          throw;
       }
-      bfs::remove_all(temp);
+      std::filesystem::remove_all(temp);
    }
 }
    BOOST_AUTO_TEST_SUITE_END()
