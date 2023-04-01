@@ -9,6 +9,11 @@
 #include <bn256/bn256.h>
 #include <fc/crypto/bls_utils.hpp>
 
+
+// FIXME: the g1_add macro from Relic screws up bn256::g1_add() call
+#undef g1_add
+
+
 namespace {
     uint32_t ceil_log2(uint32_t n)
     {
