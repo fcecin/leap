@@ -8,7 +8,8 @@
 #include <vector>
 #include <set>
 
-namespace eosio { namespace chain { namespace webassembly {
+// FIXME: put the {{ back
+namespace eosio::chain::webassembly {
 
    int interface::is_feature_active( int64_t feature_name ) const { return false; }
 
@@ -147,6 +148,63 @@ namespace eosio { namespace chain { namespace webassembly {
       }
    }
 
+   int64_t interface::set_proposed_finalizers( legacy_span<const char> packed_finalizer_schedule) {
+      // TODO: A finalizer_authority is the same as a producer_authority (producer name, sig threshold & array of weighted keys) but with an
+      //       additional integer weight associated with the named finalizer itself, so (finalizer name, finalizer weight, sig threshold
+      //       & array of weighted keys).
+
+      // TODO: A finalizer schedule is a set of finalizer authorities, a version, and a global integer finalization threshold (satisfied/crossed
+      //       by doing a sum over the weights of the finalizers that are e.g. finalizing a block).
+
+      // TODO: Verify that the finalizer schedule threshold can ever be satisfied in by the distribution of weights associated with each named
+      //       finalizer. For this to be true, the sum of all finalizer weights has to be greater or equal than the schedule's threshold.
+
+      // TODO: Verify that the integer threshold cannot ever be satisfied in an invalid manner.
+      //       For this to be true, the finalizers are sorted in descending weight order and the sum is computed. If the sum satisfies the
+      //       global threshold before more than half of the finalizer set is scanned, then the proposed finalizer schedule is invalid.
+
+      EOS_ASSERT(!context.trx_context.is_read_only(), wasm_execution_error, "set_proposed_finalizers not allowed in a readonly transaction");
+      datastream<const char*> ds( packed_finalizer_schedule.data(), packed_finalizer_schedule.size() );
+      vector<finalizer_authority> finalizers;
+      fc::raw::unpack(ds, finalizers);
+
+      EOS_ASSERT( finalizers.size() <= config::max_finalizers, wasm_execution_error, "Finalizer schedule exceeds the maximum finalizer count for this chain" );
+      EOS_ASSERT( finalizers.size() > 0, wasm_execution_error, "Finalizer schedule cannot be empty" );
+
+      const size_t num_supported_key_types = context.db.get<protocol_state_object>().num_supported_key_types;
+
+      // check that finalizers are unique
+      std::set<account_name> unique_finalizers;
+      for (const auto& f: finalizers) {
+         EOS_ASSERT( context.is_account(f.finalizer_name), wasm_execution_error, "Finalizer schedule includes a nonexisting account" );
+         std::visit([&f, num_supported_key_types](const auto& a) {
+            uint32_t sum_weights = 0;
+            std::set<public_key_type> unique_keys;
+            for (const auto& kw: a.keys ) {
+               EOS_ASSERT( kw.key.which() < num_supported_key_types, unactivated_key_type, "Unactivated key type used in proposed finalizer schedule" );
+               EOS_ASSERT( kw.key.valid(), wasm_execution_error, "Finalizer schedule includes an invalid key" );
+
+               if (std::numeric_limits<uint32_t>::max() - sum_weights <= kw.weight) {
+                  sum_weights = std::numeric_limits<uint32_t>::max();
+               } else {
+                  sum_weights += kw.weight;
+               }
+
+               unique_keys.insert(kw.key);
+            }
+
+            EOS_ASSERT( a.keys.size() == unique_keys.size(), wasm_execution_error, "Finalizer schedule includes a duplicated key for ${account}", ("account", f.finalizer_name));
+            EOS_ASSERT( a.threshold > 0, wasm_execution_error, "Finalizer schedule includes an authority with a threshold of 0 for ${account}", ("account", f.finalizer_name));
+            EOS_ASSERT( sum_weights >= a.threshold, wasm_execution_error, "Finalizer schedule includes an unsatisfiable authority for ${account}", ("account", f.finalizer_name));
+         }, f.authority);
+
+         unique_finalizers.insert(f.finalizer_name);
+      }
+      EOS_ASSERT( finalizers.size() == unique_finalizers.size(), wasm_execution_error, "Duplicate finalizer name in finalizer schedule" );
+
+      return context.control.set_proposed_finalizers( std::move(finalizers) );
+   }
+
    uint32_t interface::get_blockchain_parameters_packed( legacy_span<char> packed_blockchain_parameters ) const {
       auto& gpo = context.control.get_global_properties();
 
@@ -172,7 +230,7 @@ namespace eosio { namespace chain { namespace webassembly {
               gprops.configuration = cfg;
       });
    }
-   
+
    uint32_t interface::get_parameters_packed( span<const char> packed_parameter_ids, span<char> packed_parameters) const{
       datastream<const char*> ds_ids( packed_parameter_ids.data(), packed_parameter_ids.size() );
 
@@ -180,14 +238,14 @@ namespace eosio { namespace chain { namespace webassembly {
       std::vector<fc::unsigned_int> ids;
       fc::raw::unpack(ds_ids, ids);
       const config_range config_range(cfg, std::move(ids), {context.control});
-      
+
       auto size = fc::raw::pack_size( config_range );
       if( packed_parameters.size() == 0 ) return size;
 
       EOS_ASSERT(size <= packed_parameters.size(),
                  chain::config_parse_error,
                  "get_parameters_packed: buffer size is smaller than ${size}", ("size", size));
-      
+
       datastream<char*> ds( packed_parameters.data(), size );
       fc::raw::pack( ds, config_range );
       return size;
@@ -201,7 +259,7 @@ namespace eosio { namespace chain { namespace webassembly {
       config_range config_range(cfg, {context.control});
 
       fc::raw::unpack(ds, config_range);
-      
+
       config_range.config.validate();
       context.db.modify( context.control.get_global_properties(),
          [&]( auto& gprops ) {

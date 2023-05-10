@@ -3866,7 +3866,7 @@ void controller_impl::on_activation<builtin_protocol_feature_t::aggregate_signat
 template<>
 void controller_impl::on_activation<builtin_protocol_feature_t::instant_finality>() {
    db.modify( db.get<protocol_state_object>(), [&]( auto& ps ) {
-      // FIXME/TODO: host functions to set proposers, leaders, finalizers/validators
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "set_proposed_finalizers" ); {
    } );
 }
 
