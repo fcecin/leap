@@ -174,6 +174,17 @@ namespace webassembly {
          int64_t set_proposed_producers_ex(uint64_t packed_producer_format, legacy_span<const char> packed_producer_schedule);
 
          /**
+          * Proposes a finalizer schedule change.
+          *
+          * @ingroup privileged
+          *
+          * @param packed_finalizer_schedule - a serialized finalizer_schedule object.
+          *
+          * @return -1 if proposing a new finalizer schedule was unsucessful, otherwise returns the version of the new proposed schedule.
+         */
+         int64_t set_proposed_finalizers(legacy_span<const char> packed_finalizer_schedule);
+
+         /**
           * Retrieve the blockchain config parameters.
           *
           * @ingroup privileged
@@ -1723,11 +1734,11 @@ namespace webassembly {
          int32_t alt_bn128_mul(span<const char> g1_point, span<const char> scalar, span<char> result) const;
 
          /**
-          * Host function for optimal ate pairing check on the elliptic curve alt_bn128 
+          * Host function for optimal ate pairing check on the elliptic curve alt_bn128
           *
           * @ingroup crypto
           * @param g1_g2_pairs - a span containing pairs of G1,G2 points. (2 * 32 bytes) + (2 * 64 bytes)
-          * @return -1 if there was an error, 1 if false and 0 if true 
+          * @return -1 if there was an error, 1 if false and 0 if true
          */
          int32_t alt_bn128_pair(span<const char> g1_g2_pairs) const;
 

@@ -166,7 +166,7 @@ namespace eosio { namespace chain {
          block_state_ptr finalize_block( block_report& br, const signer_callback_type& signer_callback );
          void sign_block( const signer_callback_type& signer_callback );
          void commit_block();
-         
+
          void commit_hs_proposal_msg(hs_proposal_message_ptr msg);
          void commit_hs_vote_msg(hs_vote_message_ptr msg);
 
@@ -291,6 +291,8 @@ namespace eosio { namespace chain {
          bool is_known_unexpired_transaction( const transaction_id_type& id) const;
 
          int64_t set_proposed_producers( vector<producer_authority> producers );
+
+         int64_t set_proposed_finalizers( uint64_t fthreshold, vector<finalizer_authority> finalizers );
 
          bool light_validation_allowed() const;
          bool skip_auth_check()const;

@@ -8,8 +8,7 @@
 #include <vector>
 #include <set>
 
-// FIXME: put the {{ back
-namespace eosio::chain::webassembly {
+namespace eosio { namespace chain { namespace webassembly {
 
    int interface::is_feature_active( int64_t feature_name ) const { return false; }
 
@@ -148,12 +147,13 @@ namespace eosio::chain::webassembly {
       }
    }
 
-   int64_t interface::set_proposed_finalizers( legacy_span<const char> packed_finalizer_schedule) {
-      // TODO: A finalizer_authority is the same as a producer_authority (producer name, sig threshold & array of weighted keys) but with an
+   int64_t interface::set_proposed_finalizers(legacy_span<const char> packed_finalizer_schedule) {
+
+      // A finalizer_authority is the same as a producer_authority (producer name, sig threshold & array of weighted keys) but with an
       //       additional integer weight associated with the named finalizer itself, so (finalizer name, finalizer weight, sig threshold
       //       & array of weighted keys).
 
-      // TODO: A finalizer schedule is a set of finalizer authorities, a version, and a global integer finalization threshold (satisfied/crossed
+      // A finalizer schedule is a set of finalizer authorities, a version, and a global integer finalization threshold (satisfied/crossed
       //       by doing a sum over the weights of the finalizers that are e.g. finalizing a block).
 
       // TODO: Verify that the finalizer schedule threshold can ever be satisfied in by the distribution of weights associated with each named
@@ -163,10 +163,50 @@ namespace eosio::chain::webassembly {
       //       For this to be true, the finalizers are sorted in descending weight order and the sum is computed. If the sum satisfies the
       //       global threshold before more than half of the finalizer set is scanned, then the proposed finalizer schedule is invalid.
 
+      // TODO: Verify that the finalizer keys are of the new BLS agg sig type that is going to be registered upon feature activation.
+
+      /*
+      TODO: delete this / move to docs
+
+      The producer schedule is not removed from the code, but it can be either disabled or adapted/modified after feature activation and
+      set_proposed_finalizers takes effect.
+
+      What we probably should do is keep the producer schedule as:
+      - configuring the set of supernodes that are chosen (e.g. by system-contract governance) to be in the master whitelist for various roles
+        for which there isn't a dedicated schedule configured (like the finalizer schedule that defines the "congress" that votes for block finalization)
+      - the hotstuff protocol proposer set and schedule is sourced directly (1:1) from the producer set and schedule
+      - the hotstuff protocol leader set is sourced directly (1:1) from the producer set -- exactly how the hotstuff protocol leadership role is
+        fulfilled is mostly an implementation detail, with (perhaps) some BP config.ini variables to help customize it.
+
+      The hotstuff protocol finalizer set does not need to overlap with the producer (proposer/leader) set, but what makes most sense
+      is for every producer (whitelisted supernode) to be able to act as a hotstuff proposer, leader, and finalizer (voter), thus all these
+      sets should probably be the same by default.
+
+      Calling set_proposed_finalizers after feature activation is what really starts IF. When the feature is activated, what happens is that
+      the set_proposed_finalizers intrinsic/hostfunction is whitelisted for execution (and the BLS key type is enabled). Then, only after
+      set_proposed_finalizers is called, and its proposed hotstuff finalization protocol configuration is processed and accepted into the
+      chain (the first version of the finalizer_schedule), is that the *next* blocks start being able to be finalized through hotstuff consensus.
+
+      Data structures:
+
+      finalizer_schedule {
+         uint       version;
+         uint64     fthreshold;  // for finalization: sum of finalizer weights signing for finality
+         vector<finalizer_authority>  finalizers;
+      }
+
+      finalizer_authority {
+         name                           finalizer_name;
+         uint64                         fweight; (among all finalizers)
+         block_signing_authority        authority; // block_signing_authority object ( { int threshold, vector<> keys } ) is existing infrastructure
+      }
+      */
+
       EOS_ASSERT(!context.trx_context.is_read_only(), wasm_execution_error, "set_proposed_finalizers not allowed in a readonly transaction");
       datastream<const char*> ds( packed_finalizer_schedule.data(), packed_finalizer_schedule.size() );
-      vector<finalizer_authority> finalizers;
-      fc::raw::unpack(ds, finalizers);
+      finalizer_schedule schedule;
+      fc::raw::unpack(ds, schedule);
+      vector<finalizer_authority> & finalizers = schedule.finalizers;
 
       EOS_ASSERT( finalizers.size() <= config::max_finalizers, wasm_execution_error, "Finalizer schedule exceeds the maximum finalizer count for this chain" );
       EOS_ASSERT( finalizers.size() > 0, wasm_execution_error, "Finalizer schedule cannot be empty" );
@@ -202,7 +242,7 @@ namespace eosio::chain::webassembly {
       }
       EOS_ASSERT( finalizers.size() == unique_finalizers.size(), wasm_execution_error, "Duplicate finalizer name in finalizer schedule" );
 
-      return context.control.set_proposed_finalizers( std::move(finalizers) );
+      return context.control.set_proposed_finalizers( schedule.fthreshold, std::move(finalizers) );
    }
 
    uint32_t interface::get_blockchain_parameters_packed( legacy_span<char> packed_blockchain_parameters ) const {

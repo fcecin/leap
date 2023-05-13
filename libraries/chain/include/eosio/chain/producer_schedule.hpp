@@ -323,6 +323,171 @@ namespace eosio { namespace chain {
       return true;
    }
 
+   // =======================================================================================================
+   // TODO: move to finalizer_schedule.hpp
+   // =======================================================================================================
+
+   struct shared_finalizer_authority {
+      shared_finalizer_authority() = delete;
+      shared_finalizer_authority( const shared_finalizer_authority& ) = default;
+      shared_finalizer_authority( shared_finalizer_authority&& ) = default;
+      shared_finalizer_authority& operator= ( shared_finalizer_authority && ) = default;
+      shared_finalizer_authority& operator= ( const shared_finalizer_authority & ) = default;
+
+      shared_finalizer_authority( const name& finalizer_name, const uint64_t fweight, shared_block_signing_authority&& authority )
+      :finalizer_name(finalizer_name)
+      ,fweight(fweight)
+      ,authority(std::move(authority))
+      {}
+
+      name                                     finalizer_name;
+      uint64_t                                 fweight;
+      shared_block_signing_authority           authority;
+   };
+
+   struct shared_finalizer_schedule {
+      shared_finalizer_schedule() = delete;
+
+      explicit shared_finalizer_schedule( chainbase::allocator<char> alloc )
+      :finalizers(alloc){}
+
+      shared_finalizer_schedule( const shared_finalizer_schedule& ) = default;
+      shared_finalizer_schedule( shared_finalizer_schedule&& ) = default;
+      shared_finalizer_schedule& operator= ( shared_finalizer_schedule && ) = default;
+      shared_finalizer_schedule& operator= ( const shared_finalizer_schedule & ) = default;
+
+      uint32_t                                       version = 0; ///< sequentially incrementing version number
+      uint64_t                                       fthreshold = 0; // minimum finalizer fweight sum for block finalization
+      shared_vector<shared_finalizer_authority>      finalizers;
+   };
+
+   struct finalizer_authority {
+
+      name                    finalizer_name;
+      uint64_t                fweight; // weight that this finalizer's vote has for meeting fthreshold
+      block_signing_authority authority;
+
+      template<typename Op>
+      static void for_each_key( const block_signing_authority& authority, Op&& op ) {
+         std::visit([&op](const auto &a){
+            a.for_each_key(std::forward<Op>(op));
+         }, authority);
+      }
+
+      template<typename Op>
+      void for_each_key( Op&& op ) const {
+         for_each_key(authority, std::forward<Op>(op));
+      }
+
+      static std::pair<bool, size_t> keys_satisfy_and_relevant( const std::set<public_key_type>& keys, const block_signing_authority& authority ) {
+         return std::visit([&keys](const auto &a){
+            return a.keys_satisfy_and_relevant(keys);
+         }, authority);
+      }
+
+      std::pair<bool, size_t> keys_satisfy_and_relevant( const std::set<public_key_type>& presented_keys ) const {
+         return keys_satisfy_and_relevant(presented_keys, authority);
+      }
+
+      auto to_shared(chainbase::allocator<char> alloc) const {
+         auto shared_auth = std::visit([&alloc](const auto& a) {
+            return a.to_shared(alloc);
+         }, authority);
+
+         return shared_finalizer_authority(finalizer_name, fweight, std::move(shared_auth));
+      }
+
+      static auto from_shared( const shared_finalizer_authority& src ) {
+         finalizer_authority result;
+         result.finalizer_name = src.finalizer_name;
+         result.fweight = src.fweight;
+         result.authority = std::visit(overloaded {
+            [](const shared_block_signing_authority_v0& a) {
+               return block_signing_authority_v0::from_shared(a);
+            }
+         }, src.authority);
+
+         return result;
+      }
+
+      /**
+       * ABI's for contracts expect variants to be serialized as a 2 entry array of
+       * [type-name, value].
+       *
+       * This is incompatible with standard FC rules for
+       * static_variants which produce
+       *
+       * [ordinal, value]
+       *
+       * this method produces an appropriate variant for contracts where the authority field
+       * is correctly formatted
+       */
+      fc::variant get_abi_variant() const;
+
+      friend bool operator == ( const finalizer_authority& lhs, const finalizer_authority& rhs ) {
+         return tie( lhs.finalizer_name, lhs.fweight, lhs.authority ) == tie( rhs.finalizer_name, rhs.fweight, rhs.authority );
+      }
+      friend bool operator != ( const finalizer_authority& lhs, const finalizer_authority& rhs ) {
+         return tie( lhs.finalizer_name, lhs.fweight, lhs.authority ) != tie( rhs.finalizer_name, rhs.fweight, rhs.authority );
+      }
+   };
+
+   struct finalizer_schedule {
+      finalizer_schedule() = default;
+
+      finalizer_schedule( uint32_t version, uint64_t fthreshold, std::initializer_list<finalizer_authority> finalizers )
+      :version(version)
+      ,fthreshold(fthreshold)
+      ,finalizers(finalizers)
+      {}
+
+      auto to_shared(chainbase::allocator<char> alloc) const {
+         auto result = shared_finalizer_schedule(alloc);
+         result.version = version;
+         result.fthreshold = fthreshold;
+         result.finalizers.clear();
+         result.finalizers.reserve( finalizers.size() );
+         for( const auto& f : finalizers ) {
+            result.finalizers.emplace_back(f.to_shared(alloc));
+         }
+         return result;
+      }
+
+      static auto from_shared( const shared_finalizer_schedule& src ) {
+         finalizer_schedule result;
+         result.version = src.version;
+         result.fthreshold = src.fthreshold;
+         result.finalizers.reserve( src.finalizers.size() );
+         for( const auto& f : src.finalizers ) {
+            result.finalizers.emplace_back(finalizer_authority::from_shared(f));
+         }
+         return result;
+      }
+
+      uint32_t                                       version = 0; ///< sequentially incrementing version number
+      uint64_t                                       fthreshold;  // vote fweight threshold to finalize blocks
+      vector<finalizer_authority>                    finalizers; // Instant Finality voter set
+
+      friend bool operator == ( const finalizer_schedule& a, const finalizer_schedule& b )
+      {
+         if( a.version != b.version ) return false;
+         if( a.fthreshold != b.fthreshold ) return false;
+         if ( a.finalizers.size() != b.finalizers.size() ) return false;
+         for( uint32_t i = 0; i < a.finalizers.size(); ++i )
+            if( ! (a.finalizers[i] == b.finalizers[i]) ) return false;
+         return true;
+      }
+
+      friend bool operator != ( const finalizer_schedule& a, const finalizer_schedule& b )
+      {
+         return !(a==b);
+      }
+   };
+
+   // =======================================================================================================
+   // /TODO
+   // =======================================================================================================
+
 } } /// eosio::chain
 
 FC_REFLECT( eosio::chain::legacy::producer_key, (producer_name)(block_signing_key) )
@@ -335,3 +500,9 @@ FC_REFLECT_DERIVED( eosio::chain::producer_schedule_change_extension, (eosio::ch
 FC_REFLECT( eosio::chain::shared_block_signing_authority_v0, (threshold)(keys))
 FC_REFLECT( eosio::chain::shared_producer_authority, (producer_name)(authority) )
 FC_REFLECT( eosio::chain::shared_producer_authority_schedule, (version)(producers) )
+
+// TODO: move to finalizers.hpp
+FC_REFLECT( eosio::chain::finalizer_authority, (finalizer_name)(fweight)(authority) )
+FC_REFLECT( eosio::chain::finalizer_schedule, (version)(fthreshold)(finalizers) )
+FC_REFLECT( eosio::chain::shared_finalizer_authority, (finalizer_name)(fweight)(authority) )
+FC_REFLECT( eosio::chain::shared_finalizer_schedule, (version)(fthreshold)(finalizers) )

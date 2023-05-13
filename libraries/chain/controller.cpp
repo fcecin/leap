@@ -3360,6 +3360,65 @@ std::optional<producer_authority_schedule> controller::proposed_producers()const
    return producer_authority_schedule::from_shared(gpo.proposed_schedule);
 }
 
+int64_t controller::set_proposed_finalizers( uint64_t fthreshold, vector<finalizer_authority> finalizers ) {
+/*
+***************************************************************************************************
+TODO/REVIEW: Probably need to add the proposed finalizer schedule changes to the global properties
+object, following what is done by the proposed producer schedule.
+
+The GPO only has the proposed schedule, and the pending->active pipeline can perhaps/probably be
+simplified, i.e. you have the proposal call and its effect inside the chain, but the effecting of
+it is done outside of the chain and when it happens is e.g. implicit in the block height of the
+proposal (if it's going to be like the producer schedule).
+***************************************************************************************************
+
+   const auto& gpo = get_global_properties();
+   auto cur_block_num = head_block_num() + 1;
+
+   if( finalizers.size() == 0 ) {
+      return -1;
+   }
+
+   if( gpo.proposed_finalizer_schedule_block_num ) {
+      if( std::equal( finalizers.begin(), finalizers.end(),
+                      gpo.proposed_finalizer_schedule.finalizers.begin(), gpo.proposed_finalizer_schedule.finalizers.end() )
+          && ( fthreshold == gpo.proposed_finalizer_schedule.threshold )
+         )
+         return -1; // the proposed finalizer schedule does not change
+   }
+
+   finalizer_schedule sch;
+
+   decltype(sch.finalizers.cend()) end;
+   decltype(end)                   begin;
+
+   const auto& active_sch = active_finalizers();
+   if( active_sch.finalizers.size() > 0 ) {
+      begin = active_sch.finalizers.begin();
+      end   = active_sch.finalizers.end();
+      sch.threshold = active_sch.threshold;
+      sch.version = active_sch.version + 1;
+      if( std::equal( finalizers.begin(), finalizers.end(), begin, end )
+          && ( fthreshold == active_sch.threshold ) )
+         return -1; // the finalizer schedule would not change
+   }
+
+   sch.producers = std::move(producers);
+
+   int64_t version = sch.version;
+   int64_t fthreshold = sch.fthreshold;
+
+   ilog( "proposed finalizer schedule with version ${v} fthreshold ${t}", ("v", version)("t", fthreshold ));
+
+   my->db.modify( gpo, [&]( auto& gp ) {
+      gp.proposed_finalizer_schedule_block_num = cur_block_num;
+      gp.proposed_finalizer_schedule = sch.to_shared(gp.proposed_finalizer_schedule.finalizers.get_allocator());
+   });
+   return version;
+*/
+   return -1;
+}
+
 bool controller::light_validation_allowed() const {
    if (!my->pending || my->in_trx_requiring_checks) {
       return false;
@@ -3866,7 +3925,7 @@ void controller_impl::on_activation<builtin_protocol_feature_t::aggregate_signat
 template<>
 void controller_impl::on_activation<builtin_protocol_feature_t::instant_finality>() {
    db.modify( db.get<protocol_state_object>(), [&]( auto& ps ) {
-      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "set_proposed_finalizers" ); {
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "set_proposed_finalizers" );
    } );
 }
 
