@@ -334,15 +334,15 @@ namespace eosio { namespace chain {
       shared_finalizer_authority& operator= ( shared_finalizer_authority && ) = default;
       shared_finalizer_authority& operator= ( const shared_finalizer_authority & ) = default;
 
-      shared_finalizer_authority( const name& finalizer_name, const uint64_t fweight, shared_block_signing_authority&& authority )
+      shared_finalizer_authority( const name& finalizer_name, const uint64_t fweight, const public_key_type& public_key )
       :finalizer_name(finalizer_name)
       ,fweight(fweight)
-      ,authority(std::move(authority))
+      ,public_key(public_key)
       {}
 
       name                                     finalizer_name;
       uint64_t                                 fweight;
-      shared_block_signing_authority           authority;
+      public_key_type                          public_key;
    };
 
    struct shared_finalizer_schedule {
@@ -365,48 +365,17 @@ namespace eosio { namespace chain {
 
       name                    finalizer_name;
       uint64_t                fweight; // weight that this finalizer's vote has for meeting fthreshold
-      block_signing_authority authority;
-
-      template<typename Op>
-      static void for_each_key( const block_signing_authority& authority, Op&& op ) {
-         std::visit([&op](const auto &a){
-            a.for_each_key(std::forward<Op>(op));
-         }, authority);
-      }
-
-      template<typename Op>
-      void for_each_key( Op&& op ) const {
-         for_each_key(authority, std::forward<Op>(op));
-      }
-
-      static std::pair<bool, size_t> keys_satisfy_and_relevant( const std::set<public_key_type>& keys, const block_signing_authority& authority ) {
-         return std::visit([&keys](const auto &a){
-            return a.keys_satisfy_and_relevant(keys);
-         }, authority);
-      }
-
-      std::pair<bool, size_t> keys_satisfy_and_relevant( const std::set<public_key_type>& presented_keys ) const {
-         return keys_satisfy_and_relevant(presented_keys, authority);
-      }
+      public_key_type         public_key;
 
       auto to_shared(chainbase::allocator<char> alloc) const {
-         auto shared_auth = std::visit([&alloc](const auto& a) {
-            return a.to_shared(alloc);
-         }, authority);
-
-         return shared_finalizer_authority(finalizer_name, fweight, std::move(shared_auth));
+         return shared_finalizer_authority(finalizer_name, fweight, public_key);
       }
 
       static auto from_shared( const shared_finalizer_authority& src ) {
          finalizer_authority result;
          result.finalizer_name = src.finalizer_name;
          result.fweight = src.fweight;
-         result.authority = std::visit(overloaded {
-            [](const shared_block_signing_authority_v0& a) {
-               return block_signing_authority_v0::from_shared(a);
-            }
-         }, src.authority);
-
+         result.public_key = src.public_key;
          return result;
       }
 
@@ -425,10 +394,10 @@ namespace eosio { namespace chain {
       fc::variant get_abi_variant() const;
 
       friend bool operator == ( const finalizer_authority& lhs, const finalizer_authority& rhs ) {
-         return tie( lhs.finalizer_name, lhs.fweight, lhs.authority ) == tie( rhs.finalizer_name, rhs.fweight, rhs.authority );
+         return tie( lhs.finalizer_name, lhs.fweight, lhs.public_key ) == tie( rhs.finalizer_name, rhs.fweight, rhs.public_key );
       }
       friend bool operator != ( const finalizer_authority& lhs, const finalizer_authority& rhs ) {
-         return tie( lhs.finalizer_name, lhs.fweight, lhs.authority ) != tie( rhs.finalizer_name, rhs.fweight, rhs.authority );
+         return tie( lhs.finalizer_name, lhs.fweight, lhs.public_key ) != tie( rhs.finalizer_name, rhs.fweight, rhs.public_key );
       }
    };
 
@@ -502,7 +471,7 @@ FC_REFLECT( eosio::chain::shared_producer_authority, (producer_name)(authority) 
 FC_REFLECT( eosio::chain::shared_producer_authority_schedule, (version)(producers) )
 
 // TODO: move to finalizers.hpp
-FC_REFLECT( eosio::chain::finalizer_authority, (finalizer_name)(fweight)(authority) )
+FC_REFLECT( eosio::chain::finalizer_authority, (finalizer_name)(fweight)(public_key) )
 FC_REFLECT( eosio::chain::finalizer_schedule, (version)(fthreshold)(finalizers) )
-FC_REFLECT( eosio::chain::shared_finalizer_authority, (finalizer_name)(fweight)(authority) )
+FC_REFLECT( eosio::chain::shared_finalizer_authority, (finalizer_name)(fweight)(public_key) )
 FC_REFLECT( eosio::chain::shared_finalizer_schedule, (version)(fthreshold)(finalizers) )

@@ -196,9 +196,9 @@ namespace eosio { namespace chain { namespace webassembly {
       }
 
       finalizer_authority {
-         name                           finalizer_name;
-         uint64                         fweight; (among all finalizers)
-         block_signing_authority        authority; // block_signing_authority object ( { int threshold, vector<> keys } ) is existing infrastructure
+         name                            finalizer_name;
+         uint64                          fweight; (among all finalizers)
+         block_finalization_authority    authority; // NEW: just one key per finalizer
       }
       */
 
@@ -213,30 +213,16 @@ namespace eosio { namespace chain { namespace webassembly {
 
       const size_t num_supported_key_types = context.db.get<protocol_state_object>().num_supported_key_types;
 
-      // check that finalizers are unique
+      // check that finalizers are unique and that the keys are valid BLS keys
       std::set<account_name> unique_finalizers;
       for (const auto& f: finalizers) {
          EOS_ASSERT( context.is_account(f.finalizer_name), wasm_execution_error, "Finalizer schedule includes a nonexisting account" );
-         std::visit([&f, num_supported_key_types](const auto& a) {
-            uint32_t sum_weights = 0;
-            std::set<public_key_type> unique_keys;
-            for (const auto& kw: a.keys ) {
-               EOS_ASSERT( kw.key.which() < num_supported_key_types, unactivated_key_type, "Unactivated key type used in proposed finalizer schedule" );
-               EOS_ASSERT( kw.key.valid(), wasm_execution_error, "Finalizer schedule includes an invalid key" );
+         EOS_ASSERT( f.public_key.which() < num_supported_key_types, unactivated_key_type, "Unactivated key type used in proposed finalizer schedule" );
+         EOS_ASSERT( f.public_key.valid(), wasm_execution_error, "Finalizer schedule includes an invalid key" );
 
-               if (std::numeric_limits<uint32_t>::max() - sum_weights <= kw.weight) {
-                  sum_weights = std::numeric_limits<uint32_t>::max();
-               } else {
-                  sum_weights += kw.weight;
-               }
-
-               unique_keys.insert(kw.key);
-            }
-
-            EOS_ASSERT( a.keys.size() == unique_keys.size(), wasm_execution_error, "Finalizer schedule includes a duplicated key for ${account}", ("account", f.finalizer_name));
-            EOS_ASSERT( a.threshold > 0, wasm_execution_error, "Finalizer schedule includes an authority with a threshold of 0 for ${account}", ("account", f.finalizer_name));
-            EOS_ASSERT( sum_weights >= a.threshold, wasm_execution_error, "Finalizer schedule includes an unsatisfiable authority for ${account}", ("account", f.finalizer_name));
-         }, f.authority);
+         // -------------------------------------------
+         // FIXME/TODO: check for BLS/aggsig key type here
+         // -------------------------------------------
 
          unique_finalizers.insert(f.finalizer_name);
       }

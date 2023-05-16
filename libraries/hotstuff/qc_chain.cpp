@@ -507,14 +507,14 @@ namespace eosio { namespace hotstuff {
 
       //TODO: check for duplicate or invalid vote. We will return in either case, but keep proposals for evidence of double signing
 
-      bool am_leader = am_i_leader();
-
-      if (!am_leader)
+      // only leader need to take action on votes
+      if (! am_i_leader())
          return;
+
 #ifdef QC_CHAIN_TRACE_DEBUG
       ilog(" === Process vote from ${finalizer} : current bitset ${value}" , ("finalizer", vote.finalizer)("value", _current_qc.active_finalizers));
 #endif
-      // only leader need to take action on votes
+
       if (vote.proposal_id != _current_qc.proposal_id)
          return;
 
