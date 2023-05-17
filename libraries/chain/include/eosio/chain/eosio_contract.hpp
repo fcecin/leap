@@ -29,4 +29,7 @@ namespace eosio { namespace chain {
    void apply_eosio_canceldelay(apply_context&);
    ///@}  end action handlers
 
+   // UX Network
+   void check_account_mutable(apply_context& context, const name& owner);
+
 } } /// namespace eosio::chain

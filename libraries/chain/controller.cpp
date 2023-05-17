@@ -3532,13 +3532,17 @@ std::optional<fc::microseconds> controller::get_subjective_cpu_leeway() const {
 }
 
 void controller::set_greylist_limit( uint32_t limit ) {
-   EOS_ASSERT( 0 < limit && limit <= chain::config::maximum_elastic_resource_multiplier,
-               misc_exception,
-               "Invalid limit (${limit}) passed into set_greylist_limit. "
-               "Must be between 1 and ${max}.",
-               ("limit", limit)("max", chain::config::maximum_elastic_resource_multiplier)
-   );
-   my->conf.greylist_limit = limit;
+   // UX Network
+   //
+   //EOS_ASSERT( 0 < limit && limit <= chain::config::maximum_elastic_resource_multiplier,
+   //            misc_exception,
+   //            "Invalid limit (${limit}) passed into set_greylist_limit. "
+   //            "Must be between 1 and ${max}.",
+   //            ("limit", limit)("max", chain::config::maximum_elastic_resource_multiplier)
+   //);
+   //my->conf.greylist_limit = limit;
+   //
+   my->conf.greylist_limit = chain::config::maximum_elastic_resource_multiplier; // = 1
 }
 
 uint32_t controller::get_greylist_limit()const {

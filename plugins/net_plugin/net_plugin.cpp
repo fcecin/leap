@@ -29,6 +29,28 @@
 #include <cmath>
 #include <shared_mutex>
 
+// UX Network consensus-rules fork version 1: immutable accounts & remove
+// elastic/greylisting resources
+const int UX_NETWORK_CONSENSUS_RULES_VERSION = 1;
+
+// In the UX Network minifork, the user-agent string is used to soft-signal for
+//   support for the additional UX consensus rules. This is exposed as a
+//   configuration option, but changing it to trick the production UX Network
+//   into accepting your non-compliant node into it is no different than
+//   performing any other intentional attack.
+// Nodes will reject connections from other nodes that don't support these
+//   rules.
+// The user-agent string must be in the form "UX:n:x", where n is one or more
+//   numeric characters expressing the UX consensus-rules number (e.g. "1")
+//   and x is zero or more characters (can be anything). The last ":" separator
+//   is optional.
+// To be able to connect, two UX nodes must have the exact same consensus-rules
+//   number in the expected user-agent string format.
+const std::string UX_NETWORK_AGENT =
+   "UX:"                                                  // mandatory
+   + std::to_string(UX_NETWORK_CONSENSUS_RULES_VERSION)   // mandatory
+   + ":nodeos-leap";                                      // optional
+
 using namespace eosio::chain::plugin_interface;
 
 namespace eosio {
@@ -2834,6 +2856,32 @@ namespace eosio {
                   ("p", msg.agent.substr(0, max_handshake_str_length) + "...") );
          valid = false;
       }
+      // UX Network: the user-agent string must have "UX:n" as the prefix, where n is the UX consensus-rules version.
+      if (msg.agent.length() >= 4 && msg.agent.substr(0, 3) == "UX:") {
+         std::size_t numericStart = 3;
+         std::size_t numericEnd = msg.agent.find(':', numericStart);
+         std::string numericStr;
+         if (numericEnd == std::string::npos)
+            numericStr = msg.agent.substr(numericStart);
+         else
+            numericStr = msg.agent.substr(numericStart, numericEnd - numericStart);
+         try {
+            int numericValue = std::stoi(numericStr);
+            if (numericValue != UX_NETWORK_CONSENSUS_RULES_VERSION) {
+               peer_wlog( this, "Handshake message validation: UX Network consensus-rules mismatch; remote ${r} != local ${l}",
+                          ("r", numericValue)("l", UX_NETWORK_CONSENSUS_RULES_VERSION) );
+               valid = false;
+            }
+         } catch (const std::exception&) {
+            peer_wlog( this, "Handshake message validation: invalid UX Network consensus-rules version: ${p}",
+                       ("p", numericStr) );
+            valid = false;
+         }
+      } else {
+         peer_wlog( this, "Handshake message validation: not an UX Network user-agent: ${p}",
+                    ("p", msg.agent) );
+         valid = false;
+      }
       if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
          peer_wlog( this, "Handshake message validation: token field invalid" );
          valid = false;
@@ -3676,7 +3724,7 @@ namespace eosio {
            "     eosproducer1,p2p.eos.io:9876\n"
            "     eosproducer2,p2p.trx.eos.io:9876:trx\n"
            "     eosproducer3,p2p.blk.eos.io:9876:blk\n")
-         ( "agent-name", bpo::value<string>()->default_value("EOS Test Agent"), "The name supplied to identify this node amongst the peers.")
+         ( "agent-name", bpo::value<string>()->default_value(UX_NETWORK_AGENT), "The name supplied to identify this node amongst the peers.")
          ( "allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'producers' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once. If only 'producers', peer-key is not required. 'producers' and 'specified' may be combined.")
          ( "peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
          ( "peer-private-key", boost::program_options::value<vector<string>>()->composing()->multitoken(),
