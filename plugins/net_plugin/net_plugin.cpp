@@ -29,6 +29,8 @@
 #include <cmath>
 #include <shared_mutex>
 
+#include <boost/algorithm/cxx11/all_of.hpp>
+
 // UX Network consensus-rules fork version 1: immutable accounts & remove
 // elastic/greylisting resources
 const int UX_NETWORK_CONSENSUS_RULES_VERSION = 1;
@@ -46,10 +48,11 @@ const int UX_NETWORK_CONSENSUS_RULES_VERSION = 1;
 //   is optional.
 // To be able to connect, two UX nodes must have the exact same consensus-rules
 //   number in the expected user-agent string format.
-const std::string UX_NETWORK_AGENT =
-   "UX:"                                                  // mandatory
-   + std::to_string(UX_NETWORK_CONSENSUS_RULES_VERSION)   // mandatory
-   + ":nodeos-leap";                                      // optional
+const std::string UX_NETWORK_AGENT_ROOT = "UX:";
+const std::string UX_NETWORK_AGENT_PREFIX = UX_NETWORK_AGENT_ROOT + std::to_string(UX_NETWORK_CONSENSUS_RULES_VERSION);
+const std::string UX_NETWORK_AGENT_EXTENDED_PREFIX = UX_NETWORK_AGENT_PREFIX + ":";
+const std::string UX_NETWORK_AGENT_DEFAULT = UX_NETWORK_AGENT_EXTENDED_PREFIX + "nodeos-leap";
+const auto UX_LEN = UX_NETWORK_AGENT_ROOT.size();
 
 using namespace eosio::chain::plugin_interface;
 
@@ -2857,8 +2860,8 @@ namespace eosio {
          valid = false;
       }
       // UX Network: the user-agent string must have "UX:n" as the prefix, where n is the UX consensus-rules version.
-      if (msg.agent.length() >= 4 && msg.agent.substr(0, 3) == "UX:") {
-         std::size_t numericStart = 3;
+      if (msg.agent.length() >= UX_LEN + 1 && msg.agent.substr(0, UX_LEN) == UX_NETWORK_AGENT_ROOT) {
+         std::size_t numericStart = UX_LEN;
          std::size_t numericEnd = msg.agent.find(':', numericStart);
          std::string numericStr;
          if (numericEnd == std::string::npos)
@@ -3733,7 +3736,7 @@ namespace eosio {
            "     eosproducer1,p2p.eos.io:9876\n"
            "     eosproducer2,p2p.trx.eos.io:9876:trx\n"
            "     eosproducer3,p2p.blk.eos.io:9876:blk\n")
-         ( "agent-name", bpo::value<string>()->default_value(UX_NETWORK_AGENT), "The name supplied to identify this node amongst the peers.")
+         ( "agent-name", bpo::value<string>()->default_value(UX_NETWORK_AGENT_DEFAULT), "The name supplied to identify this node amongst the peers.")
          ( "allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'producers' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once. If only 'producers', peer-key is not required. 'producers' and 'specified' may be combined.")
          ( "peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
          ( "peer-private-key", boost::program_options::value<vector<string>>()->composing()->multitoken(),
@@ -3814,7 +3817,40 @@ namespace eosio {
             my->supplied_peers.insert(v.begin(), v.end());
          }
          if( options.count( "agent-name" )) {
-            my->user_agent_name = options.at( "agent-name" ).as<string>();
+            // UX Network: force the internal net_plugin_impl::user_agent_name value to have the expected prefix
+            // with the expected consensus rules version, irrespective of the value set in the option.
+            const std::string agent_name_option = options.at( "agent-name" ).as<string>();
+            if (agent_name_option == UX_NETWORK_AGENT_PREFIX || agent_name_option.find(UX_NETWORK_AGENT_EXTENDED_PREFIX) == 0) {
+               my->user_agent_name = agent_name_option; // pass-through: already compliant
+            } else {
+               // Do our best to remove an old UX: or UX:n or UX:n: prefix from the agent_name_option if it's there 
+               std::string result = agent_name_option;
+               if (result.size() >= UX_LEN + 2 && result.substr(0, UX_LEN) == UX_NETWORK_AGENT_ROOT) { // When the string starts with "UX:n:"
+                  size_t colonPos = result.find(':', UX_LEN);
+                  if (colonPos != std::string::npos) {
+                     std::string sequence = result.substr(UX_LEN, colonPos - UX_LEN);
+                     if (boost::algorithm::all_of(sequence, boost::algorithm::is_digit()))
+                        result.erase(0, colonPos + 1);
+                  }
+               }
+               if (result.size() >= UX_LEN + 1 && result.substr(0, UX_LEN) == UX_NETWORK_AGENT_ROOT) { // When the string starts with "UX:n" (no colon at the end)
+                  std::string sequence = result.substr(UX_LEN);
+                  if (boost::algorithm::all_of(sequence, boost::algorithm::is_digit()))
+                     result.erase(0, UX_LEN + sequence.size());
+               }
+               if (result.size() >= UX_LEN && result.substr(0, UX_LEN) == UX_NETWORK_AGENT_ROOT) // When the string starts with "UX:"
+                  result.erase(0, UX_LEN); 
+               // Force the correct prefix into our best-effort preprocessing of user_agent_name
+               std::string enforced;
+               if (result.size() == 0) {
+                  enforced = UX_NETWORK_AGENT_PREFIX;
+                  my->user_agent_name = enforced;
+               } else {
+                  enforced = UX_NETWORK_AGENT_EXTENDED_PREFIX;
+                  my->user_agent_name = enforced + result;
+               }
+               fc_wlog( logger, "provided agent-name string config '${a}' has been converted to '${u}' (enforced prefix : '${p}').", ("a", agent_name_option)("u",my->user_agent_name)("p", enforced) );
+            }
             EOS_ASSERT( my->user_agent_name.length() <= max_handshake_str_length, chain::plugin_config_exception,
                         "agent-name too long, must be less than ${m}", ("m", max_handshake_str_length) );
          }
