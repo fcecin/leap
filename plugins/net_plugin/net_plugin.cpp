@@ -2868,19 +2868,28 @@ namespace eosio {
          try {
             int numericValue = std::stoi(numericStr);
             if (numericValue != UX_NETWORK_CONSENSUS_RULES_VERSION) {
-               peer_wlog( this, "Handshake message validation: UX Network consensus-rules mismatch; remote ${r} != local ${l}",
+               peer_wlog( this, "PEER PRODUCER OR NODE **MUST** UPGRADE TO UX-NETWORK-SPECIFIC LEAP VERSION 4.0.4; CONNECTIONS FROM NON-COMPLIANT NODES WILL BE DROPPED IN THE NEXT UX LEAP VERSION. Handshake message validation: UX Network consensus-rules mismatch; remote ${r} != local ${l}",
                           ("r", numericValue)("l", UX_NETWORK_CONSENSUS_RULES_VERSION) );
-               valid = false;
+               // TODO (1 of 3): Enable this on next UX Leap version and remove warning above.
+               // For UX Leap 4.0.4, we do NOT yet boot non-UX-Leap nodes running stock AntelopeIO Leap nodes. This will be enabled in the next UX Leap version.
+               // This allows the existing UX Network to lazily upgrade to the node version check feature without any downtime.
+               //valid = false;
             }
          } catch (const std::exception&) {
-            peer_wlog( this, "Handshake message validation: invalid UX Network consensus-rules version: ${p}",
+            peer_wlog( this, "PEER PRODUCER OR NODE **MUST** UPGRADE TO UX-NETWORK-SPECIFIC LEAP VERSION 4.0.4. CONNECTIONS FROM NON-COMPLIANT NODES WILL BE DROPPED IN THE NEXT UX LEAP VERSION. Handshake message validation: invalid UX Network consensus-rules version: ${p};",
                        ("p", numericStr) );
-            valid = false;
+            // TODO (2 of 3): Enable this on next UX Leap version and remove warning above.
+            // For UX Leap 4.0.4, we do NOT yet boot non-UX-Leap nodes running stock AntelopeIO Leap nodes. This will be enabled in the next UX Leap version.
+            // This allows the existing UX Network to lazily upgrade to the node version check feature without any downtime.
+            //valid = false;
          }
       } else {
-         peer_wlog( this, "Handshake message validation: not an UX Network user-agent: ${p}",
+         peer_wlog( this, "PEER PRODUCER OR NODE **MUST** UPGRADE TO UX-NETWORK-SPECIFIC LEAP VERSION 4.0.4. CONNECTIONS FROM NON-COMPLIANT NODES WILL BE DROPPED IN THE NEXT UX LEAP VERSION. Handshake message validation: not an UX Network user-agent: ${p}",
                     ("p", msg.agent) );
-         valid = false;
+         // TODO (3 of 3): Enable this on next UX Leap version and remove warning above.
+         // For UX Leap 4.0.4, we do NOT yet boot non-UX-Leap nodes running stock AntelopeIO Leap nodes. This will be enabled in the next UX Leap version.
+         // This allows the existing UX Network to lazily upgrade to the node version check feature without any downtime.
+         //valid = false;
       }
       if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
          peer_wlog( this, "Handshake message validation: token field invalid" );
