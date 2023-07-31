@@ -30,6 +30,8 @@
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/signals2/connection.hpp>
 
+#include <unistd.h>
+
 namespace bmi = boost::multi_index;
 using bmi::indexed_by;
 using bmi::ordered_non_unique;
@@ -321,6 +323,10 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       std::optional<fc::time_point> calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const;
       void schedule_production_loop();
       void schedule_maybe_produce_block( bool exhausted );
+      void notify_hs_vote_message( const hs_vote_message_ptr& msg);
+      void notify_hs_proposal_message( const hs_proposal_message_ptr& msg );
+      void notify_hs_new_view_message( const hs_new_view_message_ptr& msg);
+      void notify_hs_new_block_message( const hs_new_block_message_ptr& msg );
       void produce_block();
       bool maybe_produce_block();
       bool block_is_exhausted() const;
@@ -357,6 +363,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       boost::program_options::variables_map _options;
       bool     _production_enabled                 = false;
       bool     _pause_production                   = false;
+      bool     _enable_stale_production_config     = false;
 
       using signature_provider_type = signature_provider_plugin::signature_provider_type;
       std::map<chain::public_key_type, signature_provider_type> _signature_providers;
@@ -404,6 +411,8 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       std::optional<scoped_connection>                          _block_start_connection;
 
       producer_plugin_metrics                                   _metrics;
+
+      std::optional<eosio::hotstuff::chain_pacemaker>           _chain_pacemaker;
 
       /*
        * HACK ALERT
@@ -503,6 +512,11 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       }
 
       void on_block( const block_state_ptr& bsp ) {
+
+         //ilog("block");
+
+         //if (bsp->block_num % 120 == 0) _qc_chain.print_state();
+
          auto before = _unapplied_transactions.size();
          _unapplied_transactions.clear_applied( bsp );
          _subjective_billing.on_block( _log, bsp, fc::time_point::now() );
@@ -884,7 +898,7 @@ void producer_plugin::set_program_options(
    boost::program_options::options_description producer_options;
 
    producer_options.add_options()
-         ("enable-stale-production,e", boost::program_options::bool_switch()->notifier([this](bool e){my->_production_enabled = e;}), "Enable block production, even if the chain is stale.")
+      ("enable-stale-production,e", boost::program_options::bool_switch()->notifier([this](bool e){my->_production_enabled = e; my->_enable_stale_production_config = e;}), "Enable block production, even if the chain is stale.")
          ("pause-on-startup,x", boost::program_options::bool_switch()->notifier([this](bool p){my->_pause_production = p;}), "Start this node in a state where production is paused")
          ("max-transaction-time", bpo::value<int32_t>()->default_value(30),
           "Limits the maximum time (in milliseconds) that is allowed a pushed transaction's code to execute before being considered invalid")
@@ -1225,6 +1239,10 @@ void producer_plugin::plugin_initialize(const boost::program_options::variables_
 
    my->_snapshot_scheduler.set_db_path(my->_snapshots_dir);
    my->_snapshot_scheduler.set_create_snapshot_fn([this](producer_plugin::next_function<producer_plugin::snapshot_information> next){create_snapshot(next);});
+
+   EOS_ASSERT( !my->_chain_pacemaker, plugin_config_exception, "duplicate chain_pacemaker initialization" );
+   my->_chain_pacemaker.emplace(&chain, my->_producers, true, true);
+
 } FC_LOG_AND_RETHROW() }
 
 using namespace std::chrono_literals;
@@ -1606,6 +1624,30 @@ void producer_plugin::schedule_protocol_feature_activations( const scheduled_pro
    }
    my->_protocol_features_to_activate = schedule.protocol_features_to_activate;
    my->_protocol_features_signaled = false;
+}
+
+void producer_plugin::notify_hs_vote_message( const hs_vote_message_ptr& msg){
+   my->notify_hs_vote_message(msg);
+};
+
+void producer_plugin::notify_hs_proposal_message( const hs_proposal_message_ptr& msg ){
+   my->notify_hs_proposal_message(msg);
+};
+
+void producer_plugin::notify_hs_new_view_message( const hs_new_view_message_ptr& msg){
+   my->notify_hs_new_view_message(msg);
+};
+
+void producer_plugin::notify_hs_new_block_message( const hs_new_block_message_ptr& msg ){
+   my->notify_hs_new_block_message(msg);
+};
+
+bool producer_plugin::get_finalizer_state( finalizer_state & fs ) const {
+   if (my->_chain_pacemaker) {
+      my->_chain_pacemaker->get_state( fs );
+      return true;
+   }
+   return false;
 }
 
 fc::variants producer_plugin::get_supported_protocol_features( const get_supported_protocol_features_params& params ) const {
@@ -2622,11 +2664,16 @@ bool producer_plugin_impl::block_is_exhausted() const {
 void producer_plugin_impl::schedule_production_loop() {
    _timer.cancel();
 
+   //ilog("loop");
+
    auto result = start_block();
 
    _idle_trx_time = fc::time_point::now();
 
    if (result == start_block_result::failed) {
+
+      //ilog("block failed");
+
       elog("Failed to start a pending block, will try again later");
       _timer.expires_from_now( boost::posix_time::microseconds( config::block_interval_us  / 10 ));
 
@@ -2639,6 +2686,9 @@ void producer_plugin_impl::schedule_production_loop() {
              }
           } ) );
    } else if (result == start_block_result::waiting_for_block){
+
+      //ilog("waiting for block");
+
       if (!_producers.empty() && !production_disabled_by_policy()) {
          fc_dlog(_log, "Waiting till another block is received and scheduling Speculative/Production Change");
          schedule_delayed_production_loop(weak_from_this(), calculate_producer_wake_up_time(calculate_pending_block_time()));
@@ -2649,6 +2699,7 @@ void producer_plugin_impl::schedule_production_loop() {
 
    } else if (result == start_block_result::waiting_for_production) {
       // scheduled in start_block()
+      //ilog("waiting for production");
 
    } else if (in_producing_mode()) {
       schedule_maybe_produce_block( result == start_block_result::exhausted );
@@ -2660,6 +2711,7 @@ void producer_plugin_impl::schedule_production_loop() {
       schedule_delayed_production_loop(weak_from_this(), calculate_producer_wake_up_time(chain.pending_block_time()));
    } else {
       fc_dlog(_log, "Speculative Block Created");
+     // ilog("speculative block created");
    }
 }
 
@@ -2767,6 +2819,28 @@ static auto maybe_make_debug_time_logger() -> std::optional<decltype(make_debug_
    }
 }
 
+
+void producer_plugin_impl::notify_hs_vote_message( const hs_vote_message_ptr& msg ){
+   if (_chain_pacemaker)
+      _chain_pacemaker->on_hs_vote_msg(*msg);
+};
+
+void producer_plugin_impl::notify_hs_proposal_message( const hs_proposal_message_ptr& msg ){
+   if (_chain_pacemaker)
+      _chain_pacemaker->on_hs_proposal_msg(*msg);
+};
+
+void producer_plugin_impl::notify_hs_new_view_message( const hs_new_view_message_ptr& msg ){
+   if (_chain_pacemaker)
+      _chain_pacemaker->on_hs_new_view_msg(*msg);
+};
+
+void producer_plugin_impl::notify_hs_new_block_message( const hs_new_block_message_ptr& msg ){
+   if (_chain_pacemaker)
+      _chain_pacemaker->on_hs_new_block_msg(*msg);
+};
+
+
 void producer_plugin_impl::produce_block() {
    //ilog("produce_block ${t}", ("t", fc::time_point::now())); // for testing _produce_time_offset_us
    auto start = fc::time_point::now();
@@ -2812,6 +2886,29 @@ void producer_plugin_impl::produce_block() {
    block_state_ptr new_bs = chain.head_block_state();
 
    _time_tracker.report(_idle_trx_time, new_bs->block_num);
+
+/*   const auto& hbs = chain.head_block_state();
+   const auto& active_schedule = hbs->active_schedule.producers;
+*/
+   //if we're producing after chain has activated, and we're not currently in the middle of a view
+   //if (hbs->header.producer != name("eosio")  &&
+   //  (_qc_chain._qc_chain_state == qc_chain::qc_chain_state::initializing || _qc_chain._qc_chain_state == qc_chain::qc_chain_state::finished_view)){
+   //   _qc_chain.create_new_view(*hbs); //we create a new view
+   //}
+
+   if (_chain_pacemaker) {
+
+      // FIXME/REVIEW: For now, we are not participating in the IF protocol as proposers
+      //   when we have the enable-stale-production plugin configuration option set.
+      // NOTE: This entire feature will likely disappear (deleted) before delivery, as
+      //   hotstuff activation only takes place, realistically, after the
+      //   stale-block-production producing/proposing boot node has been gone.
+      // Stale producing nodes being hotstuff leaders is probably fine.
+      if (!_enable_stale_production_config)
+         _chain_pacemaker->beat();
+      else
+         ilog("producer plugin will not check for Instant Finality proposer (and maybe also leader) role due to enable-stale-production option set.");
+   }
 
    br.total_time += fc::time_point::now() - start;
 

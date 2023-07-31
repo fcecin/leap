@@ -2297,6 +2297,7 @@ void read_write::send_transaction2(const read_write::send_transaction2_params& p
 }
 
 read_only::get_abi_results read_only::get_abi( const get_abi_params& params, const fc::time_point& deadline )const {
+   try {
    get_abi_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
@@ -2307,9 +2308,11 @@ read_only::get_abi_results read_only::get_abi( const get_abi_params& params, con
    }
 
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account abi")
 }
 
 read_only::get_code_results read_only::get_code( const get_code_params& params, const fc::time_point& deadline )const {
+   try {
    get_code_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
@@ -2329,9 +2332,11 @@ read_only::get_code_results read_only::get_code( const get_code_params& params, 
    }
 
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account code")
 }
 
 read_only::get_code_hash_results read_only::get_code_hash( const get_code_hash_params& params, const fc::time_point& deadline )const {
+   try {
    get_code_hash_results result;
    result.account_name = params.account_name;
    const auto& d = db.db();
@@ -2341,9 +2346,11 @@ read_only::get_code_hash_results read_only::get_code_hash( const get_code_hash_p
       result.code_hash = accnt.code_hash;
 
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account code hash")
 }
 
 read_only::get_raw_code_and_abi_results read_only::get_raw_code_and_abi( const get_raw_code_and_abi_params& params, const fc::time_point& deadline)const {
+   try {
    get_raw_code_and_abi_results result;
    result.account_name = params.account_name;
 
@@ -2357,9 +2364,11 @@ read_only::get_raw_code_and_abi_results read_only::get_raw_code_and_abi( const g
    result.abi = blob{{accnt_obj.abi.begin(), accnt_obj.abi.end()}};
 
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account code/abi")
 }
 
 read_only::get_raw_abi_results read_only::get_raw_abi( const get_raw_abi_params& params, const fc::time_point& deadline )const {
+   try {
    get_raw_abi_results result;
    result.account_name = params.account_name;
 
@@ -2373,9 +2382,11 @@ read_only::get_raw_abi_results read_only::get_raw_abi( const get_raw_abi_params&
       result.abi = blob{{accnt_obj.abi.begin(), accnt_obj.abi.end()}};
 
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account abi")
 }
 
 read_only::get_account_results read_only::get_account( const get_account_params& params, const fc::time_point& deadline )const {
+   try {
    get_account_results result;
    result.account_name = params.account_name;
 
@@ -2543,6 +2554,7 @@ read_only::get_account_results read_only::get_account( const get_account_params&
       }
    }
    return result;
+   } EOS_RETHROW_EXCEPTIONS(chain::account_query_exception, "unable to retrieve account info")
 }
 
 read_only::get_required_keys_result read_only::get_required_keys( const get_required_keys_params& params, const fc::time_point& deadline )const {
@@ -2660,6 +2672,31 @@ read_only::get_consensus_parameters(const get_consensus_parameters_params&, cons
    results.chain_config = db.get_global_properties().configuration;
    results.wasm_config = db.get_global_properties().wasm_configuration;
 
+   return results;
+}
+
+read_only::get_finalizer_state_results
+read_only::get_finalizer_state(const get_finalizer_state_params&, const fc::time_point& deadline ) const {
+   get_finalizer_state_results results;
+   if ( producer_plug ) {  // producer_plug is null when called from chain_plugin_tests.cpp and get_table_tests.cpp
+      finalizer_state fs;
+      producer_plug->get_finalizer_state( fs );
+      results.chained_mode           = fs.chained_mode;
+      results.b_leaf                 = fs.b_leaf;
+      results.b_lock                 = fs.b_lock;
+      results.b_exec                 = fs.b_exec;
+      results.b_finality_violation   = fs.b_finality_violation;
+      results.block_exec             = fs.block_exec;
+      results.pending_proposal_block = fs.pending_proposal_block;
+      results.v_height               = fs.v_height;
+      results.high_qc                = fs.high_qc;
+      results.current_qc             = fs.current_qc;
+      results.schedule               = fs.schedule;
+      for (auto proposal: fs.proposals) {
+         chain::hs_proposal_message & p = proposal.second;
+         results.proposals.push_back( hs_complete_proposal_message( p ) );
+      }
+   }
    return results;
 }
 

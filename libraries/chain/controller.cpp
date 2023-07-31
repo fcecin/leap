@@ -338,6 +338,8 @@ struct controller_impl {
       set_activation_handler<builtin_protocol_feature_t::get_code_hash>();
       set_activation_handler<builtin_protocol_feature_t::get_block_num>();
       set_activation_handler<builtin_protocol_feature_t::crypto_primitives>();
+      set_activation_handler<builtin_protocol_feature_t::aggregate_signatures>();
+      set_activation_handler<builtin_protocol_feature_t::instant_finality>();
 
       self.irreversible_block.connect([this](const block_state_ptr& bsp) {
          // producer_plugin has already asserted irreversible_block signal is
@@ -1698,6 +1700,8 @@ struct controller_impl {
    {
       EOS_ASSERT( !pending, block_validate_exception, "pending block already exists" );
 
+      //ilog("starting block... ");
+
       emit( self.block_start, head->block_num + 1 );
 
       // at block level, no transaction specific logging is possible
@@ -1972,6 +1976,22 @@ struct controller_impl {
 
       // push the state for pending.
       pending->push();
+   }
+
+   void commit_hs_proposal_msg(hs_proposal_message_ptr msg){
+      emit( self.new_hs_proposal_message, msg );
+   }
+
+   void commit_hs_vote_msg(hs_vote_message_ptr msg){
+      emit( self.new_hs_vote_message, msg );
+   }
+
+   void commit_hs_new_view_msg(hs_new_view_message_ptr msg){
+      emit( self.new_hs_new_view_message, msg );
+   }
+
+   void commit_hs_new_block_msg(hs_new_block_message_ptr msg){
+      emit( self.new_hs_new_block_message, msg );
    }
 
    /**
@@ -2997,6 +3017,22 @@ void controller::commit_block() {
    my->commit_block(true);
 }
 
+void controller::commit_hs_proposal_msg(hs_proposal_message_ptr msg) {
+   my->commit_hs_proposal_msg(msg);
+}
+
+void controller::commit_hs_vote_msg(hs_vote_message_ptr msg) {
+   my->commit_hs_vote_msg(msg);
+}
+
+void controller::commit_hs_new_view_msg(hs_new_view_message_ptr msg) {
+   my->commit_hs_new_view_msg(msg);
+}
+
+void controller::commit_hs_new_block_msg(hs_new_block_message_ptr msg) {
+   my->commit_hs_new_block_msg(msg);
+}
+
 deque<transaction_metadata_ptr> controller::abort_block() {
    return my->abort_block();
 }
@@ -3837,6 +3873,23 @@ void controller_impl::on_activation<builtin_protocol_feature_t::crypto_primitive
       add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "blake2_f" );
       add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "sha3" );
       add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "k1_recover" );
+   } );
+}
+
+template<>
+void controller_impl::on_activation<builtin_protocol_feature_t::aggregate_signatures>() {
+   db.modify( db.get<protocol_state_object>(), [&]( auto& ps ) {
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "bls_verify" );
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "bls_aggregate_pubkeys" );
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "bls_aggregate_sigs" );
+      add_intrinsic_to_whitelist( ps.whitelisted_intrinsics, "bls_aggregate_verify" );
+   } );
+}
+
+template<>
+void controller_impl::on_activation<builtin_protocol_feature_t::instant_finality>() {
+   db.modify( db.get<protocol_state_object>(), [&]( auto& ps ) {
+      // FIXME/TODO: host functions to set proposers, leaders, finalizers/validators
    } );
 }
 

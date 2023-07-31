@@ -1,6 +1,8 @@
 add_subdirectory( secp256k1 )
 add_subdirectory( libraries/bn256/src )
 
+add_subdirectory( libraries/bls-signatures )
+
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads)
@@ -53,10 +55,13 @@ set( fc_sources
      src/crypto/public_key.cpp
      src/crypto/private_key.cpp
      src/crypto/signature.cpp
+     src/crypto/bls_private_key.cpp
+     src/crypto/bls_public_key.cpp
+     src/crypto/bls_signature.cpp
+     src/crypto/bls_utils.cpp
      src/crypto/modular_arithmetic.cpp
      src/crypto/blake2.cpp
      src/crypto/k1_recover.cpp
-     src/network/ip.cpp
      src/network/url.cpp
      src/network/http/http_client.cpp
      src/compress/zlib.cpp
@@ -123,11 +128,7 @@ find_package(ZLIB REQUIRED)
 target_include_directories(fc PUBLIC include)
 
 # try and make this very clear that this json parser is intended only for webauthn parsing..
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.11.0)
-   set_source_files_properties(src/crypto/elliptic_webauthn.cpp PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include/fc/crypto/webauthn_json/include")
-else()
-   set_source_files_properties(src/crypto/elliptic_webauthn.cpp PROPERTIES COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/include/fc/crypto/webauthn_json/include")
-endif()
+set_source_files_properties(src/crypto/elliptic_webauthn.cpp PROPERTIES COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}/include/fc/crypto/webauthn_json/include")
 
 if(WIN32)
   target_link_libraries( fc PUBLIC ws2_32 mswsock userenv )
@@ -137,7 +138,8 @@ if(APPLE)
   find_library(security_framework Security)
   find_library(corefoundation_framework CoreFoundation)
 endif()
-target_link_libraries( fc PUBLIC Boost::date_time Boost::filesystem Boost::chrono Boost::iostreams Threads::Threads
+
+target_link_libraries( fc PUBLIC bls Boost::date_time Boost::filesystem Boost::chrono Boost::iostreams Threads::Threads
                                  OpenSSL::Crypto ZLIB::ZLIB ${PLATFORM_SPECIFIC_LIBS} ${CMAKE_DL_LIBS} secp256k1 ${security_framework} ${corefoundation_framework})
 
 # Critically, this ensures that OpenSSL 1.1 & 3.0 both have a variant of BN_zero() with void return value. But it also allows access

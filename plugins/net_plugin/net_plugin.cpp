@@ -12,7 +12,6 @@
 #include <eosio/chain/contract_types.hpp>
 
 #include <fc/network/message_buffer.hpp>
-#include <fc/network/ip.hpp>
 #include <fc/io/json.hpp>
 #include <fc/io/raw.hpp>
 #include <fc/log/appender.hpp>
@@ -192,6 +191,12 @@ namespace eosio {
                          const time_point_sec& now = time_point::now() );
       bool have_txn( const transaction_id_type& tid ) const;
       void expire_txns();
+
+      void bcast_hs_proposal_msg(const hs_proposal_message_ptr& msg);
+      void bcast_hs_vote_msg(const hs_vote_message_ptr& msg);
+      void bcast_hs_new_view_msg(const hs_new_view_message_ptr& msg);
+      void bcast_hs_new_block_msg(const hs_new_block_message_ptr& msg);
+
    };
 
    /**
@@ -211,8 +216,9 @@ namespace eosio {
    constexpr auto     def_keepalive_interval = 10000;
 
    constexpr auto     message_header_size = sizeof(uint32_t);
-   constexpr uint32_t signed_block_which       = fc::get_index<net_message, signed_block>();       // see protocol net_message
-   constexpr uint32_t packed_transaction_which = fc::get_index<net_message, packed_transaction>(); // see protocol net_message
+
+   constexpr uint32_t signed_block_which           = fc::get_index<net_message, signed_block>();         // see protocol net_message
+   constexpr uint32_t packed_transaction_which     = fc::get_index<net_message, packed_transaction>();   // see protocol net_message
 
    class net_plugin_impl : public std::enable_shared_from_this<net_plugin_impl>,
                            public auto_bp_peering::bp_connection_manager<net_plugin_impl, connection> {
@@ -315,6 +321,11 @@ namespace eosio {
 
       void transaction_ack(const std::pair<fc::exception_ptr, packed_transaction_ptr>&);
       void on_irreversible_block( const block_state_ptr& blk );
+
+      void on_hs_proposal_message( const hs_proposal_message_ptr& msg );
+      void on_hs_vote_message( const hs_vote_message_ptr& msg );
+      void on_hs_new_view_message( const hs_new_view_message_ptr& msg );
+      void on_hs_new_block_message( const hs_new_block_message_ptr& msg );
 
       void start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection);
       void start_expire_timer();
@@ -439,9 +450,10 @@ namespace eosio {
    constexpr uint16_t proto_dup_goaway_resolution = 5;     // eosio 2.1: support peer address based duplicate connection resolution
    constexpr uint16_t proto_dup_node_id_goaway = 6;        // eosio 2.1: support peer node_id based duplicate connection resolution
    constexpr uint16_t proto_leap_initial = 7;            // leap client, needed because none of the 2.1 versions are supported
+   constexpr uint16_t proto_instant_finality = 8;        // instant finality
 #pragma GCC diagnostic pop
 
-   constexpr uint16_t net_version_max = proto_leap_initial;
+   constexpr uint16_t net_version_max = proto_instant_finality;
 
    /**
     * Index by start_block_num
@@ -702,6 +714,7 @@ namespace eosio {
 
       bool process_next_block_message(uint32_t message_length);
       bool process_next_trx_message(uint32_t message_length);
+
    public:
 
       bool populate_handshake( handshake_message& hello );
@@ -800,6 +813,11 @@ namespace eosio {
       void handle_message( const packed_transaction& msg ) = delete; // packed_transaction_ptr overload used instead
       void handle_message( packed_transaction_ptr msg );
 
+      void handle_message( const hs_vote_message& msg );
+      void handle_message( const hs_proposal_message& msg );
+      void handle_message( const hs_new_view_message& msg );
+      void handle_message( const hs_new_block_message& msg );
+
       void process_signed_block( const block_id_type& id, signed_block_ptr msg, block_state_ptr bsp );
 
       fc::variant_object get_logger_variant() const {
@@ -876,6 +894,29 @@ namespace eosio {
          peer_dlog( c, "handle sync_request_message" );
          c->handle_message( msg );
       }
+
+      void operator()( const hs_vote_message& msg ) const {
+         // continue call to handle_message on connection strand
+         peer_dlog( c, "handle hs_vote_message" );
+         c->handle_message( msg );
+      }
+      void operator()( const hs_proposal_message& msg ) const {
+         // continue call to handle_message on connection strand
+         peer_dlog( c, "handle hs_proposal_message" );
+         c->handle_message( msg );
+      }
+      void operator()( const hs_new_view_message& msg ) const {
+         // continue call to handle_message on connection strand
+         peer_dlog( c, "handle hs_new_view_message" );
+         c->handle_message( msg );
+      }
+      void operator()( const hs_new_block_message& msg ) const {
+         // continue call to handle_message on connection strand
+         peer_dlog( c, "handle hs_new_block_message" );
+         c->handle_message( msg );
+      }
+
+
    };
 
 
@@ -2179,6 +2220,58 @@ namespace eosio {
       } );
    }
 
+   void dispatch_manager::bcast_hs_proposal_msg(const hs_proposal_message_ptr& msg) {
+      if( my_impl->sync_master->syncing_with_peer() ) return;
+      hs_proposal_message & msg_val = *(msg.get());
+      for_each_block_connection( [this, &msg_val]( auto& cp ) {
+         if( !cp->current() ) return true;
+         cp->strand.post( [this, cp, msg_val]() {
+            if (cp->protocol_version >= proto_instant_finality)
+               cp->enqueue( msg_val );
+         });
+         return true;
+      } );
+   }
+
+   void dispatch_manager::bcast_hs_vote_msg(const hs_vote_message_ptr& msg) {
+      if( my_impl->sync_master->syncing_with_peer() ) return;
+      hs_vote_message & msg_val = *(msg.get());
+      for_each_block_connection( [this, &msg_val]( auto& cp ) {
+         if( !cp->current() ) return true;
+         cp->strand.post( [this, cp, msg_val]() {
+            if (cp->protocol_version >= proto_instant_finality)
+               cp->enqueue( msg_val );
+         });
+         return true;
+      } );
+   }
+
+   void dispatch_manager::bcast_hs_new_block_msg(const hs_new_block_message_ptr& msg) {
+      if( my_impl->sync_master->syncing_with_peer() ) return;
+      hs_new_block_message & msg_val = *(msg.get());
+      for_each_block_connection( [this, &msg_val]( auto& cp ) {
+         if( !cp->current() ) return true;
+         cp->strand.post( [this, cp, msg_val]() {
+            if (cp->protocol_version >= proto_instant_finality)
+               cp->enqueue( msg_val );
+         });
+         return true;
+      } );
+   }
+
+   void dispatch_manager::bcast_hs_new_view_msg(const hs_new_view_message_ptr& msg) {
+      if( my_impl->sync_master->syncing_with_peer() ) return;
+      hs_new_view_message & msg_val = *(msg.get());
+      for_each_block_connection( [this, &msg_val]( auto& cp ) {
+         if( !cp->current() ) return true;
+         cp->strand.post( [this, cp, msg_val]() {
+            if (cp->protocol_version >= proto_instant_finality)
+               cp->enqueue( msg_val );
+         });
+         return true;
+      } );
+   }
+
    // called from c's connection strand
    void dispatch_manager::recv_block(const connection_ptr& c, const block_id_type& id, uint32_t bnum) {
       std::unique_lock<std::mutex> g( c->conn_mtx );
@@ -2605,13 +2698,12 @@ namespace eosio {
          auto peek_ds = pending_message_buffer.create_peek_datastream();
          unsigned_int which{};
          fc::raw::unpack( peek_ds, which );
+
          if( which == signed_block_which ) {
             latest_blk_time = std::chrono::system_clock::now();
             return process_next_block_message( message_length );
-
          } else if( which == packed_transaction_which ) {
             return process_next_trx_message( message_length );
-
          } else {
             auto ds = pending_message_buffer.create_datastream();
             net_message msg;
@@ -3198,6 +3290,49 @@ namespace eosio {
       }
    }
 
+   void connection::handle_message( const hs_vote_message& msg ) {
+      //peer_ilog( this, "received confirmation message" );
+      //ilog("received confirmation message");
+
+      if (my_impl->producer_plug != nullptr){
+         hs_vote_message_ptr msg_ptr = std::make_shared<hs_vote_message>(msg);
+         my_impl->producer_plug->notify_hs_vote_message(msg_ptr);
+      }
+
+   }
+
+   void connection::handle_message( const hs_proposal_message& msg ) {
+      //peer_ilog( this, "received consensus message" );
+      //ilog("received consensus message");
+
+      if (my_impl->producer_plug != nullptr){
+         hs_proposal_message_ptr msg_ptr = std::make_shared<hs_proposal_message>(msg);
+         my_impl->producer_plug->notify_hs_proposal_message(msg_ptr);
+      }
+
+   }
+
+   void connection::handle_message( const hs_new_view_message& msg ) {
+      //peer_ilog( this, "received new view message" );
+      //ilog("received new view message");
+
+      if (my_impl->producer_plug != nullptr){
+         hs_new_view_message_ptr msg_ptr = std::make_shared<hs_new_view_message>(msg);
+         my_impl->producer_plug->notify_hs_new_view_message(msg_ptr);
+      }
+
+   }
+
+   void connection::handle_message( const hs_new_block_message& msg ) {
+      //peer_ilog( this, "received new block message" );
+      //ilog("received new block message");
+
+      if (my_impl->producer_plug != nullptr){
+         hs_new_block_message_ptr msg_ptr = std::make_shared<hs_new_block_message>(msg);
+         my_impl->producer_plug->notify_hs_new_block_message(msg_ptr);
+      }
+
+   }
    size_t calc_trx_size( const packed_transaction_ptr& trx ) {
       return trx->get_estimated_size();
    }
@@ -3523,6 +3658,46 @@ namespace eosio {
    void net_plugin_impl::on_accepted_block(const block_state_ptr& ) {
       on_pending_schedule(chain_plug->chain().pending_producers());
       on_active_schedule(chain_plug->chain().active_producers());
+   }
+
+   // called from application thread
+   void net_plugin_impl::on_hs_proposal_message( const hs_proposal_message_ptr& msg ){
+      //ilog("network plugin received consensus message from application");
+
+      dispatcher->strand.post( [this, msg]() {
+         dispatcher->bcast_hs_proposal_msg( msg );
+      });
+
+   }
+
+   // called from application thread
+   void net_plugin_impl::on_hs_vote_message( const hs_vote_message_ptr& msg ){
+      //ilog("network plugin received confirmation message from application");
+
+      dispatcher->strand.post( [this, msg]() {
+         dispatcher->bcast_hs_vote_msg( msg );
+      });
+
+   }
+
+   // called from application thread
+   void net_plugin_impl::on_hs_new_view_message( const hs_new_view_message_ptr& msg ){
+      //ilog("network plugin received new_view message from application");
+
+      dispatcher->strand.post( [this, msg]() {
+         dispatcher->bcast_hs_new_view_msg( msg );
+      });
+
+   }
+
+   // called from application thread
+   void net_plugin_impl::on_hs_new_block_message( const hs_new_block_message_ptr& msg ){
+      //ilog("network plugin received new_block message from application");
+
+      dispatcher->strand.post( [this, msg]() {
+         dispatcher->bcast_hs_new_block_msg( msg );
+      });
+
    }
 
    // called from application thread
@@ -3888,6 +4063,20 @@ namespace eosio {
          cc.irreversible_block.connect( [my = my]( const block_state_ptr& s ) {
             my->on_irreversible_block( s );
          } );
+
+         cc.new_hs_proposal_message.connect( [my = my]( const hs_proposal_message_ptr& s ) {
+            my->on_hs_proposal_message( s );
+         } );
+         cc.new_hs_vote_message.connect( [my = my]( const hs_vote_message_ptr& s ) {
+            my->on_hs_vote_message( s );
+         } );
+         cc.new_hs_new_view_message.connect( [my = my]( const hs_new_view_message_ptr& s ) {
+            my->on_hs_new_view_message( s );
+         } );
+         cc.new_hs_new_block_message.connect( [my = my]( const hs_new_block_message_ptr& s ) {
+            my->on_hs_new_block_message( s );
+         } );
+
       }
 
       {
@@ -3938,7 +4127,7 @@ namespace eosio {
       try {
          fc_ilog( logger, "shutdown.." );
 
-         my->plugin_shutdown();   
+         my->plugin_shutdown();
          app().executor().post( 0, [me = my](){} ); // keep my pointer alive until queue is drained
          fc_ilog( logger, "exit shutdown" );
       }
